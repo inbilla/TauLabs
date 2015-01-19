@@ -888,7 +888,7 @@ static const TIM_TimeBaseInitTypeDef tim_1_15_16_17_time_base = {
 	.TIM_RepetitionCounter = 0x0000,
 };
 
-static const TIM_TimeBaseInitTypeDef tim_2_3_time_base = {
+static const TIM_TimeBaseInitTypeDef tim_2_3_4_time_base = {
 	.TIM_Prescaler = (PIOS_PERIPHERAL_APB1_CLOCK / 1000000 * 2) - 1,
 	.TIM_ClockDivision = TIM_CKD_DIV1,
 	.TIM_CounterMode = TIM_CounterMode_Up,
@@ -898,7 +898,7 @@ static const TIM_TimeBaseInitTypeDef tim_2_3_time_base = {
 
 static const struct pios_tim_clock_cfg tim_2_cfg = {
 	.timer = TIM2,
-	.time_base_init = &tim_2_3_time_base,
+	.time_base_init = &tim_2_3_4_time_base,
 	.irq = {
 		.init = {
 			.NVIC_IRQChannel                   = TIM2_IRQn,
@@ -911,10 +911,23 @@ static const struct pios_tim_clock_cfg tim_2_cfg = {
 
 static const struct pios_tim_clock_cfg tim_3_cfg = {
 	.timer = TIM3,
-	.time_base_init = &tim_2_3_time_base,
+	.time_base_init = &tim_2_3_4_time_base,
 	.irq = {
 		.init = {
 			.NVIC_IRQChannel                   = TIM3_IRQn,
+			.NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_MID,
+			.NVIC_IRQChannelSubPriority        = 0,
+			.NVIC_IRQChannelCmd                = ENABLE,
+		},
+	},
+};
+
+static const struct pios_tim_clock_cfg tim_4_cfg = {
+	.timer = TIM4,
+	.time_base_init = &tim_2_3_4_time_base,
+	.irq = {
+		.init = {
+			.NVIC_IRQChannel                   = TIM4_IRQn,
 			.NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_MID,
 			.NVIC_IRQChannelSubPriority        = 0,
 			.NVIC_IRQChannelCmd                = ENABLE,
@@ -1284,7 +1297,52 @@ struct pios_servo_cfg pios_servo_cfg = {
 
 #endif	/* PIOS_INCLUDE_SERVO && PIOS_INCLUDE_TIM */
 
+#include <pios_fsk.h>
 
+struct pios_fsk_cfg pios_fsk_cfg = {
+	.baudRate = 1225, // Bits per second
+	.highFreq = 7350, // Hz
+	.lowFreq = 4900, // Hz
+	.txBufferSize = 32,// bytes
+	.tim_base_init = {
+		.timer = TIM2,
+		.time_base_init = &tim_2_3_4_time_base,
+		.irq = {
+			.init = {
+				.NVIC_IRQChannel                   = TIM2_IRQn,
+				.NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_MID,
+				.NVIC_IRQChannelSubPriority        = 0,
+				.NVIC_IRQChannelCmd                = ENABLE,
+			},
+		},
+	},
+	.tim_oc_init = {
+		.TIM_OCMode = TIM_OCMode_PWM1,
+		.TIM_OutputState = TIM_OutputState_Enable,
+		.TIM_OutputNState = TIM_OutputNState_Disable,
+		.TIM_Pulse = PIOS_SERVOS_INITIAL_POSITION,
+		.TIM_OCPolarity = TIM_OCPolarity_High,
+		.TIM_OCNPolarity = TIM_OCPolarity_High,
+		.TIM_OCIdleState = TIM_OCIdleState_Reset,
+		.TIM_OCNIdleState = TIM_OCNIdleState_Reset,
+	},
+	.channel = {
+		.timer = TIM2,
+		.timer_chan = TIM_Channel_3,
+		.remap = GPIO_AF_1,
+		.pin = {
+			.gpio = GPIOA,
+			.init = {
+				.GPIO_Pin = GPIO_Pin_2,
+				.GPIO_Speed = GPIO_Speed_2MHz,
+				.GPIO_Mode  = GPIO_Mode_AF,
+				.GPIO_OType = GPIO_OType_PP,
+				.GPIO_PuPd  = GPIO_PuPd_UP
+			},
+			.pin_source = GPIO_PinSource2,
+		},
+	},
+};
 
 /*
  * PWM Inputs

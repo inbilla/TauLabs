@@ -923,8 +923,12 @@ void PIOS_Board_Init(void) {
 #ifndef PIOS_DEBUG_ENABLE_DEBUG_PINS
 #ifdef PIOS_INCLUDE_SERVO
 	pios_servo_cfg.num_channels = number_of_pwm_outputs;
+	pios_servo_cfg.num_channels = 4;
 	PIOS_Servo_Init(&pios_servo_cfg);
 #endif
+
+	PIOS_Fsk_Init(&pios_fsk_cfg);
+
 #else
 	PIOS_DEBUG_Init(&pios_tim_servo_all_channels, NELEMENTS(pios_tim_servo_all_channels));
 #endif

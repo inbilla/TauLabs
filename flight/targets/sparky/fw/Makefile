@@ -138,6 +138,7 @@ SRC += $(PIOSCOMMON)/pios_sbus.c
 SRC += $(PIOSCOMMON)/pios_hsum.c
 SRC += $(PIOSCOMMON)/pios_sensors.c
 SRC += $(PIOSCOMMON)/pios_gcsrcvr.c
+SRC += $(PIOSCOMMON)/pios_fsk.c
 SRC += $(PIOSCOMMON)/pios_flash.c
 SRC += $(PIOSCOMMON)/pios_flashfs_logfs.c
 SRC += $(PIOSCOMMON)/printf-stdarg.c

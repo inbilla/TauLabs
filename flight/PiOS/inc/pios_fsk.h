@@ -6,7 +6,7 @@
  * @brief
  * @{
  *
- * @file       PIOS_fsk.c
+ * @file       PIOS_fsk.h
  * @author     The Tau Labs Team, http://www.taulabls.org Copyright (C) 2013.
  * @brief
  * @see        The GNU Public License (GPL) Version 3
@@ -26,29 +26,28 @@
  * with this program; if not, write to the Free Software Foundation, Inc., 
  * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
+#ifndef PIOS_FSK_H_
+#define PIOS_FSK_H_
 
-#include "PIOS_fsk.h"
+#include <pios.h>
+#include <pios_stm32.h>
+#include <pios_tim_priv.h>
 
-/* Project Includes */
-#include "pios.h"
-
-static const struct pios_fsk_cfg * fsk_cfg;
-
-int32_t PIOS_Fsk_Init(const struct pios_fsk_cfg * cfg)
+struct pios_fsk_cfg
 {
-	uintptr_t tim_id;
-	if (PIOS_TIM_InitChannels(&tim_id, cfg->channels, cfg->num_channels, NULL, 0)) {
-		return -1;
-	}
-}
+	uint32_t baudRate; // Bits per second // 1225
+	uint32_t highFreq; // High frequency in Hz // 7350
+	uint32_t lowFreq; // Low frequency in Hz // 4900
+	uint32_t txBufferSize; // Maximum tx buffer size required // 32
 
-uint32_t PIOS_Fsk_Write(const void * pData, uint32_t length)
-{
+	struct pios_tim_clock_cfg tim_base_init;
+	TIM_OCInitTypeDef tim_oc_init;
+	GPIO_InitTypeDef gpio_init;
+	uint32_t remap;
+	struct pios_tim_channel channel;
+};
 
-}
+extern int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg);
+extern uint32_t PIOS_Fsk_Write(const void * pData, uint32_t length);
 
-void PIOS_Fsk_ISR_Edge()
-{
-
-}
-
+#endif /* PIOS_FSK_H_ */

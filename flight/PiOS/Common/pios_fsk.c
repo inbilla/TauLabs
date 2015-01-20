@@ -31,6 +31,18 @@
 
 /* Project Includes */
 #include "pios.h"
+#include "pios_dma.h"
+
+struct pios_fsk_tim_cmd
+{
+	uint32_t AAR;
+	uint16_t RCR;
+};
+
+struct pios_fsk_tim_cmd_byte
+{
+	struct pios_fsk_tim_cmd bit[8];
+};
 
 struct pios_fsk_device
 {
@@ -38,10 +50,9 @@ struct pios_fsk_device
 	struct pios_fsk_cfg * cfg;
 
 	// Buffer management (ring)
-	void * buffer;
+	struct pios_fsk_tim_cmd_byte * buffer;
 	uint32_t nextWrite;
 	uint32_t nextRead;
-	char currentBit;
 
 	// Timing information
 	uint32_t bitHalfPeriod[2];
@@ -58,6 +69,20 @@ const static struct pios_tim_callbacks tim_callbacks = {
 	.edge     = PIOS_Fsk_tim_edge_cb,
 };
 
+static char bufferAllocation[ 32 * sizeof(struct pios_fsk_tim_cmd_byte) ];
+
+static void PIOS_Fsk_DMA_Handler(void)
+{
+	if (DMA_GetFlagStatus(DMA1_IT_TC1)) { // whole double buffer filled
+		DMA_ClearFlag(DMA1_IT_TC1);
+	} else if (DMA_GetFlagStatus(DMA1_IT_HT1)) {
+		DMA_ClearFlag(DMA1_IT_HT1);
+	} else {
+		// This should not happen, probably due to transfer errors
+		DMA_ClearFlag((DMA1_FLAG_TC1 | DMA1_FLAG_TE1 | DMA1_FLAG_HT1 | DMA1_FLAG_GL1));
+	}
+}
+
 int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 {
 	uintptr_t tim_id;
@@ -66,6 +91,8 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 	}
 
 	fsk_dev.cfg = cfg;
+	const uint32_t totalBufferSize = cfg->txBufferSize * sizeof(struct pios_fsk_tim_cmd_byte);
+	fsk_dev.buffer = (struct pios_fsk_tim_cmd_byte*)&bufferAllocation[0];//PIOS_alloc( totalBufferSize );
 
 	const struct pios_tim_channel * chan = &cfg->channel;
 
@@ -126,48 +153,52 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 
 		TIM_ARRPreloadConfig(chan->timer, ENABLE);
 		TIM_CtrlPWMOutputs(chan->timer, ENABLE);
-		TIM_Cmd(chan->timer, ENABLE);
 	}
 
-#if 0 // SERVO CODE
-	/* Configure the channels to be in output compare mode */
-	for (uint8_t i = 0; i < cfg->num_channels; i++) {
-		const struct pios_tim_channel * chan = &cfg->channels[i];
+	// Configure DMA channel
+	{
+		/* DeInitialize the DMA2 Stream5 */
+		  DMA_DeInit(DMA1_Channel2);
 
-		/* Set up for output compare function */
-		switch(chan->timer_chan) {
-			case TIM_Channel_1:
-				TIM_OC1Init(chan->timer, (TIM_OCInitTypeDef*)&cfg->tim_oc_init);
-				TIM_OC1PreloadConfig(chan->timer, TIM_OCPreload_Enable);
-				break;
-			case TIM_Channel_2:
-				TIM_OC2Init(chan->timer, (TIM_OCInitTypeDef*)&cfg->tim_oc_init);
-				TIM_OC2PreloadConfig(chan->timer, TIM_OCPreload_Enable);
-				break;
-			case TIM_Channel_3:
-				TIM_OC3Init(chan->timer, (TIM_OCInitTypeDef*)&cfg->tim_oc_init);
-				TIM_OC3PreloadConfig(chan->timer, TIM_OCPreload_Enable);
-				break;
-			case TIM_Channel_4:
-				TIM_OC4Init(chan->timer, (TIM_OCInitTypeDef*)&cfg->tim_oc_init);
-				TIM_OC4PreloadConfig(chan->timer, TIM_OCPreload_Enable);
-				break;
+		  DMA_InitTypeDef DMA_InitStructure;
+		  DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)(&chan->timer->DMAR);
+		  DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t)fsk_dev.buffer;
+		  DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralDST;
+		  DMA_InitStructure.DMA_BufferSize = totalBufferSize;
+		  DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+		  DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
+		  DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
+		  DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
+		  DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
+		  DMA_InitStructure.DMA_Priority = DMA_Priority_Medium;
+		  DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
+
+		  DMA_Init(DMA1_Channel2, &DMA_InitStructure);
+
+		  PIOS_DMA_Install_Interrupt_handler(DMA1_Channel2, &PIOS_Fsk_DMA_Handler);
+
+		  TIM_DMAConfig(chan->timer, TIM_DMABase_ARR, TIM_DMABurstLength_3Transfers);
+		  TIM_DMACmd(chan->timer, TIM_DMA_Update, ENABLE);
+	}
+
+	// Initialize the buffer's contents
+	{
+		for (uint32_t i = 0; i < cfg->txBufferSize; ++i)
+		{
+			for (uint32_t bit = 0; bit < 8; ++bit)
+			{
+				uint32_t bitSelection = bit % 2;
+				fsk_dev.buffer[i].bit[bit].AAR = fsk_dev.bitHalfPeriod[bitSelection];
+				fsk_dev.buffer[i].bit[bit].RCR = fsk_dev.bitRepeat[bitSelection];
+			}
 		}
+	}
 
-		TIM_ARRPreloadConfig(chan->timer, ENABLE);
-		TIM_CtrlPWMOutputs(chan->timer, ENABLE);
+	// Enable the timer
+	{
 		TIM_Cmd(chan->timer, ENABLE);
+		DMA_Cmd(DMA1_Channel2, ENABLE);
 	}
-
-	/* Allocate memory */
-	output_timer_frequency_scaler = PIOS_malloc(servo_cfg->num_channels * sizeof(typeof(output_timer_frequency_scaler)));
-	// Check that memory was successfully allocated, and return if not
-	if (output_timer_frequency_scaler == NULL) {
-		return -1;
-	}
-	memset(output_timer_frequency_scaler, 0, servo_cfg->num_channels * sizeof(typeof(output_timer_frequency_scaler)));
-#endif
-
 
 	// TEST CODE:
 	{

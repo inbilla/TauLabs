@@ -102,7 +102,6 @@ static void PIOS_Fsk_DMA_Handler(void)
 	}
 }
 
-
 int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 {
 	PIOS_DebugMsg("FSK Init\n");
@@ -116,7 +115,7 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 	fsk_dev.cfg = cfg;
 	const uint32_t totalBufferSize = cfg->txBufferSize * sizeof(struct pios_fsk_tim_cmd_byte);
 	void * rawBuffer = PIOS_malloc(totalBufferSize + 1);
-	fsk_dev.buffer = (struct pios_fsk_tim_cmd_byte*)(((uint32_t)rawBuffer + 1) % 2);
+	fsk_dev.buffer = (struct pios_fsk_tim_cmd_byte*)(((uint32_t)rawBuffer + 1) & 0xFFFFFFFE);
 
 	const struct pios_tim_channel * chan = &cfg->channel;
 
@@ -182,19 +181,13 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 		TIM_ARRPreloadConfig(chan->timer, ENABLE);
 		TIM_CtrlPWMOutputs(chan->timer, ENABLE);
 	}
-	PIOS_DELAY_WaitmS(200);
-	PIOS_DebugMsg("FSK Config NVIC 1\n");
-	PIOS_DELAY_WaitmS(200);
-	PIOS_DebugMsg("FSK Config NVIC 2\n");
-	PIOS_DELAY_WaitmS(200);
-	PIOS_DebugMsg("FSK Config NVIC 3\n");
-	PIOS_DELAY_WaitmS(200);
-	PIOS_DebugMsg("FSK Config NVIC 4\n");
+
+	PIOS_DebugMsg("FSK Config NVIC \n");
 	// Configure DMA channel
 	{
 		NVIC_InitTypeDef NVICInit = {
 			.NVIC_IRQChannel                   = DMA1_Channel2_IRQn,
-			.NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_LOW,
+			.NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_HIGH,
 			.NVIC_IRQChannelSubPriority        = 0,
 			.NVIC_IRQChannelCmd                = ENABLE,
 			};

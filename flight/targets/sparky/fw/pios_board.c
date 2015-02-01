@@ -317,6 +317,8 @@ void panic(int32_t code) {
 		PIOS_DELAY_WaitmS(200);
 		PIOS_WDG_Clear();
 		PIOS_DELAY_WaitmS(100);
+
+		PIOS_COM_SendFormattedString(pios_com_aux_id, "PANIC\n");
 	}
 }
 
@@ -683,6 +685,7 @@ void PIOS_Board_Init(void) {
 	/* UART3 Port */
 	uint8_t hw_main;
 	HwSparkyMainPortGet(&hw_main);
+	hw_main = HWSPARKY_MAINPORT_DEBUGCONSOLE;
 	switch (hw_main) {
 	case HWSPARKY_MAINPORT_DISABLED:
 		break;
@@ -927,8 +930,6 @@ void PIOS_Board_Init(void) {
 	PIOS_Servo_Init(&pios_servo_cfg);
 #endif
 
-	PIOS_Fsk_Init(&pios_fsk_cfg);
-
 #else
 	PIOS_DEBUG_Init(&pios_tim_servo_all_channels, NELEMENTS(pios_tim_servo_all_channels));
 #endif
@@ -1107,6 +1108,8 @@ void PIOS_Board_Init(void) {
 
 	/* Make sure we have at least one telemetry link configured or else fail initialization */
 	PIOS_Assert(pios_com_telem_rf_id || pios_com_telem_usb_id);
+
+	PIOS_Fsk_Init(&pios_fsk_cfg);
 }
 
 /**

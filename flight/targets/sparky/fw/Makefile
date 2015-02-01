@@ -29,6 +29,7 @@ include $(BOARD_INFO_DIR)/board-info.mk
 # Set developer code and compile options
 # Set to YES for debugging
 DEBUG ?= NO
+#ENABLE_DEBUG_CONSOLE ?= YES
 
 # List of modules to include
 MODULES = Sensors

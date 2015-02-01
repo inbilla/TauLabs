@@ -34,8 +34,18 @@ void (*pios_dma_handler_map[PIOS_DMA_MAX_CHANNELS][PIOS_DMA_MAX_HANDLERS_PER_CHA
 
 const static DMA_Channel_TypeDef * dma_channels[] = PIOS_DMA_CHANNELS;
 
+extern uintptr_t pios_com_aux_id;
+void PIOS_DMA_DebugMsg( const char * msg)
+{
+	PIOS_COM_SendFormattedString(pios_com_aux_id, msg);
+}
+
 void PIOS_DMA_Default_Handler(void){
-        while(true){};
+	PIOS_DMA_DebugMsg("DMA_Default_Handler_TRAP");
+        while(true)
+        {
+
+        };
 }
 
 int8_t PIOS_DMA_Install_Interrupt_handler(DMA_Channel_TypeDef *channel, void * function)

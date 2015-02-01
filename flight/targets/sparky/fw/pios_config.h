@@ -33,6 +33,7 @@
 /* Major features */
 #define PIOS_INCLUDE_FREERTOS
 #define PIOS_INCLUDE_BL_HELPER
+#define PIOS_INCLUDE_DEBUG_CONSOLE
 
 /* Enable/Disable PiOS Modules */
 #define PIOS_INCLUDE_ADC

@@ -126,6 +126,12 @@ out_fail:
 	return(-1);
 }
 
+extern uintptr_t pios_com_aux_id;
+void PIOS_TIM_DebugMsg( const char * msg)
+{
+	PIOS_COM_SendFormattedString(pios_com_aux_id, msg);
+}
+
 static void PIOS_TIM_generic_irq_handler(TIM_TypeDef * timer)
 {
 	/* Iterate over all registered clients of the TIM layer to find channels on this timer */
@@ -376,6 +382,7 @@ static void PIOS_TIM_1_TRG_COM_TIM_17_irq_handler(void)
 void TIM2_IRQHandler(void) __attribute__ ((alias ("PIOS_TIM_2_irq_handler")));
 static void PIOS_TIM_2_irq_handler(void)
 {
+	PIOS_TIM_DebugMsg("TIM2 IRQ handler\n");
 	PIOS_TIM_generic_irq_handler(TIM2);
 }
 

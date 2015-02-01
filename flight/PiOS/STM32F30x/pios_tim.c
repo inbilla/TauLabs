@@ -382,7 +382,6 @@ static void PIOS_TIM_1_TRG_COM_TIM_17_irq_handler(void)
 void TIM2_IRQHandler(void) __attribute__ ((alias ("PIOS_TIM_2_irq_handler")));
 static void PIOS_TIM_2_irq_handler(void)
 {
-	PIOS_TIM_DebugMsg("TIM2 IRQ handler\n");
 	PIOS_TIM_generic_irq_handler(TIM2);
 }
 
@@ -426,6 +425,7 @@ static void PIOS_TIM_8_BRK_irq_handler (void)
 void TIM8_UP_IRQHandler(void) __attribute__ ((alias ("PIOS_TIM_8_UP_irq_handler")));
 static void PIOS_TIM_8_UP_irq_handler (void)
 {
+	PIOS_TIM_DebugMsg("TIM8 UP IRQ handler\n");
 	PIOS_TIM_generic_irq_handler(TIM8);
 }
 

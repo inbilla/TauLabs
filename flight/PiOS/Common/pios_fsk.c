@@ -36,7 +36,8 @@
 struct pios_fsk_tim_cmd
 {
 	uint32_t ARR;
-	uint16_t RCR;
+	//uint16_t RCR;
+	//uint16_t RESERVED;
 };
 
 struct pios_fsk_tim_cmd_byte
@@ -89,15 +90,20 @@ void PIOS_SpinDebugMsg( char * msg )
 static void PIOS_Fsk_DMA_Handler(void)
 {
 	PIOS_DebugMsg("DMA IRQ handler\n");
-	if (DMA_GetFlagStatus(DMA1_IT_TC2)) { // whole double buffer filled
-		DMA_ClearFlag(DMA1_IT_TC2);
+	if (DMA_GetFlagStatus(DMA2_IT_TC1))
+	{
+		DMA_ClearFlag(DMA2_IT_TC1);
 		PIOS_DebugMsg("\tDMA Clear TC\n");
-	} else if (DMA_GetFlagStatus(DMA1_IT_HT2)) {
-		DMA_ClearFlag(DMA1_IT_HT2);
+	}
+	else if (DMA_GetFlagStatus(DMA2_IT_HT1))
+	{
+		DMA_ClearFlag(DMA2_IT_HT1);
 		PIOS_DebugMsg("\tDMA Clear HT\n");
-	} else {
-		// This should not happen, probably due to transfer errors
-		DMA_ClearFlag((DMA1_FLAG_TC2 | DMA1_FLAG_TE2 | DMA1_FLAG_HT2 | DMA1_FLAG_GL2));
+	}
+	else
+	{
+		// Probably due to transfer errors
+		DMA_ClearFlag((DMA2_FLAG_TC1 | DMA2_FLAG_TE1 | DMA2_FLAG_HT1 | DMA2_FLAG_GL1));
 		PIOS_DebugMsg("DMA Clear ALL\n");
 	}
 }
@@ -111,6 +117,16 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 	}
 
 	RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
+
+	if (sizeof(struct pios_fsk_tim_cmd) == 2*2 &&
+		0x4000004C == (uint32_t)(&TIM2->DMAR))
+	{
+		PIOS_DebugMsg("FSK What you expect\n");
+	}
+	else
+	{
+		PIOS_DebugMsg("FSK NOT what you expect\n");
+	}
 
 	fsk_dev.cfg = cfg;
 	const uint32_t totalBufferSize = cfg->txBufferSize * sizeof(struct pios_fsk_tim_cmd_byte);
@@ -142,6 +158,8 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 		tim_base.TIM_Period = fsk_dev.bitHalfPeriod[bitSelection];
 		tim_base.TIM_RepetitionCounter = fsk_dev.bitRepeat[bitSelection];
 
+		//TIM_ITConfig(chan->timer, TIM_IT_Update, ENABLE);
+
 		TIM_TimeBaseInit(chan->timer, &tim_base);
 	}
 
@@ -150,8 +168,8 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 	{
 		// Adjust the functionality defined:
 		cfg->tim_oc_init.TIM_OCMode = TIM_OCMode_Toggle;
-		cfg->tim_oc_init.TIM_OutputState = TIM_OutputState_Enable;
-		cfg->tim_oc_init.TIM_OutputNState = TIM_OutputNState_Disable;
+		cfg->tim_oc_init.TIM_OutputState = TIM_OutputState_Disable;
+		cfg->tim_oc_init.TIM_OutputNState = TIM_OutputNState_Enable;
 		cfg->tim_oc_init.TIM_Pulse = 0;//fsk_dev.bitPeriod[bitSelection] / 2;
 		cfg->tim_oc_init.TIM_OCPolarity = TIM_OCPolarity_High;
 		cfg->tim_oc_init.TIM_OCNPolarity = TIM_OCPolarity_High;
@@ -186,25 +204,25 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 	// Configure DMA channel
 	{
 		NVIC_InitTypeDef NVICInit = {
-			.NVIC_IRQChannel                   = DMA1_Channel2_IRQn,
-			.NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_HIGH,
+			.NVIC_IRQChannel                   = DMA2_Channel1_IRQn,
+			.NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_MID,
 			.NVIC_IRQChannelSubPriority        = 0,
 			.NVIC_IRQChannelCmd                = ENABLE,
 			};
 		NVIC_Init(&NVICInit);
-		NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+		NVIC_EnableIRQ(DMA2_Channel1_IRQn);
 		PIOS_DebugMsg("FSK Config DMA\n");
 
-		PIOS_DMA_Install_Interrupt_handler(DMA1_Channel2, &PIOS_Fsk_DMA_Handler);
+		PIOS_DMA_Install_Interrupt_handler(DMA2_Channel1, &PIOS_Fsk_DMA_Handler);
 
 		/* DeInitialize the DMA1 Stream2 */
-		DMA_DeInit(DMA1_Channel2);
+		DMA_DeInit(DMA2_Channel1);
 
 		DMA_InitTypeDef DMA_InitStructure;
 		DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)(&chan->timer->DMAR);
 		DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t)fsk_dev.buffer;
 		DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralDST;
-		DMA_InitStructure.DMA_BufferSize = 3*2 + 0*totalBufferSize;
+		DMA_InitStructure.DMA_BufferSize = 2*2 + 0*totalBufferSize;
 		DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
 		DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
 		DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
@@ -213,15 +231,15 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 		DMA_InitStructure.DMA_Priority = DMA_Priority_Medium;
 		DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
 
-		//DMA_Cmd(DMA1_Channel2, DISABLE);
-		//while (DMA1_Channel2->CR & DMA_S2CR_EN);
-		DMA_Init(DMA1_Channel2, &DMA_InitStructure);
+		//DMA_Cmd(DMA2_Channel1, DISABLE);
+		//while (DMA2_Channel1->CR & DMA_S2CR_EN);
+		DMA_Init(DMA2_Channel1, &DMA_InitStructure);
 
-		DMA_ITConfig(DMA1_Channel2, DMA1_FLAG_TC2 | DMA1_FLAG_TE2 | DMA1_FLAG_HT2 | DMA1_FLAG_GL2, ENABLE);
-		//DMA_ITConfig(DMA1_Channel2, DMA1_FLAG_TC2 | DMA1_FLAG_GL2, ENABLE);
-		DMA_ClearFlag((DMA1_FLAG_TC2 | DMA1_FLAG_TE2 | DMA1_FLAG_HT2 | DMA1_FLAG_GL2));
+		DMA_ITConfig(DMA2_Channel1, (DMA2_FLAG_TC1 | DMA2_FLAG_TE1 | DMA2_FLAG_HT1 | DMA2_FLAG_GL1), ENABLE);
+		//DMA_ITConfig(DMA2_Channel1, DMA2_FLAG_TC1 | DMA2_FLAG_GL1, ENABLE);
+		DMA_ClearFlag((DMA2_FLAG_TC1 | DMA2_FLAG_TE1 | DMA2_FLAG_HT1 | DMA2_FLAG_GL1));
 
-		TIM_DMAConfig(chan->timer, TIM_DMABase_ARR, TIM_DMABurstLength_3Transfers);
+		TIM_DMAConfig(chan->timer, TIM_DMABase_ARR, TIM_DMABurstLength_2Transfers);
 		TIM_DMACmd(chan->timer, TIM_DMA_Update, ENABLE);
 	}
 
@@ -234,18 +252,22 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 			{
 				uint32_t bitSelection = bit % 2;
 				fsk_dev.buffer[i].bit[bit].ARR = fsk_dev.bitHalfPeriod[bitSelection]*2;
-				fsk_dev.buffer[i].bit[bit].RCR = fsk_dev.bitRepeat[bitSelection];
+				//fsk_dev.buffer[i].bit[bit].RCR = fsk_dev.bitRepeat[bitSelection];
 			}
 		}
 	}
 
 	// Enable the timer
 	{
-		DMA_ClearFlag((DMA1_FLAG_TC2 | DMA1_FLAG_TE2 | DMA1_FLAG_HT2 | DMA1_FLAG_GL2));
-		DMA_Cmd(DMA1_Channel2, ENABLE);
+		DMA_ClearFlag((DMA2_FLAG_TC1 | DMA2_FLAG_TE1 | DMA2_FLAG_HT1 | DMA2_FLAG_GL1));
+		DMA_Cmd(DMA2_Channel1, ENABLE);
 		PIOS_DebugMsg("DMA Enable\n");
-
+		PIOS_DELAY_WaitmS(300);
+		PIOS_DebugMsg("DMA Enable 2 Wait\n");
+		PIOS_DELAY_WaitmS(300);
+		PIOS_DebugMsg("DMA Enable 3 Wait\n");
 		TIM_Cmd(chan->timer, ENABLE);
+
 		PIOS_DebugMsg("Timer Enable\n");
 	}
 

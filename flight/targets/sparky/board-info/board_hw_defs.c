@@ -880,7 +880,7 @@ void PIOS_RTC_IRQ_Handler (void)
 
 #include "pios_tim_priv.h"
 
-static const TIM_TimeBaseInitTypeDef tim_1_15_16_17_time_base = {
+static const TIM_TimeBaseInitTypeDef tim_1_8_15_16_17_time_base = {
 	.TIM_Prescaler = (PIOS_PERIPHERAL_APB2_CLOCK / 1000000) - 1,
 	.TIM_ClockDivision = TIM_CKD_DIV1,
 	.TIM_CounterMode = TIM_CounterMode_Up,
@@ -888,7 +888,7 @@ static const TIM_TimeBaseInitTypeDef tim_1_15_16_17_time_base = {
 	.TIM_RepetitionCounter = 0x0000,
 };
 
-static const TIM_TimeBaseInitTypeDef tim_2_3_4_time_base = {
+static const TIM_TimeBaseInitTypeDef tim_2_3_time_base = {
 	.TIM_Prescaler = (PIOS_PERIPHERAL_APB1_CLOCK / 1000000 * 2) - 1,
 	.TIM_ClockDivision = TIM_CKD_DIV1,
 	.TIM_CounterMode = TIM_CounterMode_Up,
@@ -898,7 +898,7 @@ static const TIM_TimeBaseInitTypeDef tim_2_3_4_time_base = {
 
 static const struct pios_tim_clock_cfg tim_2_cfg = {
 	.timer = TIM2,
-	.time_base_init = &tim_2_3_4_time_base,
+	.time_base_init = &tim_2_3_time_base,
 	.irq = {
 		.init = {
 			.NVIC_IRQChannel                   = TIM2_IRQn,
@@ -911,7 +911,7 @@ static const struct pios_tim_clock_cfg tim_2_cfg = {
 
 static const struct pios_tim_clock_cfg tim_3_cfg = {
 	.timer = TIM3,
-	.time_base_init = &tim_2_3_4_time_base,
+	.time_base_init = &tim_2_3_time_base,
 	.irq = {
 		.init = {
 			.NVIC_IRQChannel                   = TIM3_IRQn,
@@ -922,22 +922,9 @@ static const struct pios_tim_clock_cfg tim_3_cfg = {
 	},
 };
 
-static const struct pios_tim_clock_cfg tim_4_cfg = {
-	.timer = TIM4,
-	.time_base_init = &tim_2_3_4_time_base,
-	.irq = {
-		.init = {
-			.NVIC_IRQChannel                   = TIM4_IRQn,
-			.NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_MID,
-			.NVIC_IRQChannelSubPriority        = 0,
-			.NVIC_IRQChannelCmd                = ENABLE,
-		},
-	},
-};
-
 static const struct pios_tim_clock_cfg tim_1_cfg = {
 	.timer = TIM1,
-	.time_base_init = &tim_1_15_16_17_time_base,
+	.time_base_init = &tim_1_8_15_16_17_time_base,
 	.irq = {
 		.init = {
 			.NVIC_IRQChannel                   = TIM1_CC_IRQn,
@@ -947,9 +934,21 @@ static const struct pios_tim_clock_cfg tim_1_cfg = {
 		},
 	},
 };
+static const struct pios_tim_clock_cfg tim_8_cfg = {
+	.timer = TIM8,
+	.time_base_init = &tim_1_8_15_16_17_time_base,
+	.irq = {
+		.init = {
+			.NVIC_IRQChannel                   = TIM8_CC_IRQn,
+			.NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_MID,
+			.NVIC_IRQChannelSubPriority        = 0,
+			.NVIC_IRQChannelCmd                = ENABLE,
+		},
+	},
+};
 static const struct pios_tim_clock_cfg tim_15_cfg = {
 	.timer = TIM15,
-	.time_base_init = &tim_1_15_16_17_time_base,
+	.time_base_init = &tim_1_8_15_16_17_time_base,
 	.irq = {
 		.init = {
 			.NVIC_IRQChannel                   = TIM1_BRK_TIM15_IRQn,
@@ -962,7 +961,7 @@ static const struct pios_tim_clock_cfg tim_15_cfg = {
 
 static const struct pios_tim_clock_cfg tim_16_cfg = {
 	.timer = TIM16,
-	.time_base_init = &tim_1_15_16_17_time_base,
+	.time_base_init = &tim_1_8_15_16_17_time_base,
 	.irq = {
 		.init = {
 			.NVIC_IRQChannel                   = TIM1_UP_TIM16_IRQn,
@@ -974,7 +973,7 @@ static const struct pios_tim_clock_cfg tim_16_cfg = {
 };
 static const struct pios_tim_clock_cfg tim_17_cfg = {
 	.timer = TIM17,
-	.time_base_init = &tim_1_15_16_17_time_base,
+	.time_base_init = &tim_1_8_15_16_17_time_base,
 	.irq = {
 		.init = {
 			.NVIC_IRQChannel                   = TIM1_TRG_COM_TIM17_IRQn,
@@ -1112,9 +1111,9 @@ static const struct pios_tim_channel pios_tim_servoport_v01_pins[] = {
 
 static const struct pios_tim_channel pios_tim_servoport_v02_pins[] = {
 	{ // Ch1 TIM15_CH2 (PB15)
-		.timer = TIM1,
-		.timer_chan = TIM_Channel_3,
-		.remap = GPIO_AF_4,
+		.timer = TIM15,
+		.timer_chan = TIM_Channel_2,
+		.remap = GPIO_AF_1,
 		.pin = {
 			.gpio = GPIOB,
 			.init = {
@@ -1305,11 +1304,11 @@ struct pios_fsk_cfg pios_fsk_cfg = {
 	.lowFreq = 4900, // Hz
 	.txBufferSize = 2,// bytes
 	.tim_base_init = {
-		.timer = TIM2,
-		.time_base_init = &tim_2_3_4_time_base,
+		.timer = TIM8,
+		.time_base_init = &tim_1_8_15_16_17_time_base,
 		.irq = {
 			.init = {
-				.NVIC_IRQChannel                   = TIM2_IRQn,
+				.NVIC_IRQChannel                   = TIM8_UP_IRQn,
 				.NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_MID,
 				.NVIC_IRQChannelSubPriority        = 0,
 				.NVIC_IRQChannelCmd                = ENABLE,
@@ -1318,8 +1317,8 @@ struct pios_fsk_cfg pios_fsk_cfg = {
 	},
 	.tim_oc_init = {
 		.TIM_OCMode = TIM_OCMode_PWM1,
-		.TIM_OutputState = TIM_OutputState_Enable,
-		.TIM_OutputNState = TIM_OutputNState_Disable,
+		.TIM_OutputState = TIM_OutputState_Disable,
+		.TIM_OutputNState = TIM_OutputNState_Enable,
 		.TIM_Pulse = PIOS_SERVOS_INITIAL_POSITION,
 		.TIM_OCPolarity = TIM_OCPolarity_High,
 		.TIM_OCNPolarity = TIM_OCPolarity_High,
@@ -1327,19 +1326,19 @@ struct pios_fsk_cfg pios_fsk_cfg = {
 		.TIM_OCNIdleState = TIM_OCNIdleState_Reset,
 	},
 	.channel = {
-		.timer = TIM2,
+		.timer = TIM8,
 		.timer_chan = TIM_Channel_3,
-		.remap = GPIO_AF_1,
+		.remap = GPIO_AF_4,
 		.pin = {
-			.gpio = GPIOA,
+			.gpio = GPIOB,
 			.init = {
-				.GPIO_Pin = GPIO_Pin_2,
+				.GPIO_Pin = GPIO_Pin_1,
 				.GPIO_Speed = GPIO_Speed_2MHz,
 				.GPIO_Mode  = GPIO_Mode_AF,
 				.GPIO_OType = GPIO_OType_PP,
 				.GPIO_PuPd  = GPIO_PuPd_UP
 			},
-			.pin_source = GPIO_PinSource2,
+			.pin_source = GPIO_PinSource1,
 		},
 	},
 };
@@ -1352,13 +1351,13 @@ struct pios_fsk_cfg pios_fsk_cfg = {
 
 /*
  * 	INPUTS
-	1:  TIM15_CH2  (PA3)
+	1:  TIM2_CH4  (PA3)
  */
 static const struct pios_tim_channel pios_tim_rcvrport_ppm[] = {
 	{
-		.timer = TIM15,
-		.timer_chan = TIM_Channel_2,
-		.remap = GPIO_AF_9,
+		.timer = TIM2,
+		.timer_chan = TIM_Channel_4,
+		.remap = GPIO_AF_1,
 		.pin = {
 			.gpio = GPIOA,
 			.init = {

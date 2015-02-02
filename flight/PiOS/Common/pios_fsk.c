@@ -33,17 +33,22 @@
 #include "pios.h"
 #include "pios_dma.h"
 
+#pragma pack(push, 1)
+
 struct pios_fsk_tim_cmd
 {
-	uint32_t ARR;
-	//uint16_t RCR;
+	uint16_t ARR;
+	uint16_t RCR;
 	//uint16_t RESERVED;
 };
+
 
 struct pios_fsk_tim_cmd_byte
 {
 	struct pios_fsk_tim_cmd bit[8];
 };
+
+#pragma pack(pop)
 
 struct pios_fsk_device
 {
@@ -117,7 +122,7 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 	}
 
 	RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
-
+	PIOS_COM_SendFormattedString(pios_com_aux_id, "sizeof(fsk_tim_cmd): %d\n", sizeof(struct pios_fsk_tim_cmd));
 	if (sizeof(struct pios_fsk_tim_cmd) == 2*2 &&
 		0x4000004C == (uint32_t)(&TIM2->DMAR))
 	{
@@ -143,8 +148,8 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 		fsk_dev.bitHalfPeriod[0] = 1000000 / (cfg->lowFreq * 2);
 		fsk_dev.bitHalfPeriod[1] = 1000000 / (cfg->highFreq * 2);
 
-		fsk_dev.bitRepeat[0] = usPerBit / fsk_dev.bitHalfPeriod[0];
-		fsk_dev.bitRepeat[1] = usPerBit / fsk_dev.bitHalfPeriod[1];
+		fsk_dev.bitRepeat[0] = usPerBit / fsk_dev.bitHalfPeriod[0] / 2 - 1;
+		fsk_dev.bitRepeat[1] = usPerBit / fsk_dev.bitHalfPeriod[1] / 2 - 1;
 	}
 
 	uint32_t bitSelection  = 0;
@@ -235,7 +240,7 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 		//while (DMA2_Channel1->CR & DMA_S2CR_EN);
 		DMA_Init(DMA2_Channel1, &DMA_InitStructure);
 
-		DMA_ITConfig(DMA2_Channel1, (DMA2_FLAG_TC1 | DMA2_FLAG_TE1 | DMA2_FLAG_HT1 | DMA2_FLAG_GL1), ENABLE);
+		DMA_ITConfig(DMA2_Channel1, (DMA2_FLAG_TC1 | DMA2_FLAG_TE1 | DMA2_FLAG_HT1 | DMA2_FLAG_GL1), DISABLE);
 		//DMA_ITConfig(DMA2_Channel1, DMA2_FLAG_TC1 | DMA2_FLAG_GL1, ENABLE);
 		DMA_ClearFlag((DMA2_FLAG_TC1 | DMA2_FLAG_TE1 | DMA2_FLAG_HT1 | DMA2_FLAG_GL1));
 
@@ -251,8 +256,8 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 			for (uint32_t bit = 0; bit < 8; ++bit)
 			{
 				uint32_t bitSelection = bit % 2;
-				fsk_dev.buffer[i].bit[bit].ARR = fsk_dev.bitHalfPeriod[bitSelection]*2;
-				//fsk_dev.buffer[i].bit[bit].RCR = fsk_dev.bitRepeat[bitSelection];
+				fsk_dev.buffer[i].bit[bit].ARR = fsk_dev.bitHalfPeriod[bitSelection];
+				fsk_dev.buffer[i].bit[bit].RCR = fsk_dev.bitRepeat[bitSelection];
 			}
 		}
 	}
@@ -279,6 +284,14 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 	}
 	PIOS_DebugMsg("End FSK init\n");
 	//PIOS_SpinDebugMsg("EndInitSpin\n");
+
+	while (1)
+	{
+		PIOS_WDG_Clear();
+		PIOS_COM_SendFormattedString(pios_com_aux_id, "TIM ARR: %d, RCR %d\n", TIM8->ARR, (uint32_t)TIM8->RCR);
+		PIOS_DELAY_WaitmS(200);
+	}
+
 	return 0;
 }
 

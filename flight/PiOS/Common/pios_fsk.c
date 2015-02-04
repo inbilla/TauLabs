@@ -27,6 +27,17 @@
  * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+/**
+ * AFSK Protocol:
+ * n x HIGH = Carrier setup
+ * for each byte:
+ *   1 x LOW = Start bit
+ *   8 x XXX = Data bits (LSB first)
+ *   1 x HIGH = Stop bit
+ * 1 x HIGH = Push bit
+ */
+
+
 #include "pios_fsk.h"
 
 /* Project Includes */
@@ -35,44 +46,64 @@
 
 #pragma pack(push, 1)
 
-struct pios_fsk_tim_cmd
+struct pios_fsk_tx_tim_cmd
 {
 	uint16_t ARR;
 	uint16_t RCR;
-	//uint16_t RESERVED;
-};
-
-
-struct pios_fsk_tim_cmd_byte
-{
-	struct pios_fsk_tim_cmd bit[8];
 };
 
 #pragma pack(pop)
 
-struct pios_fsk_device
+struct pios_fsk_tx_command_buffer
+{
+	// Command buffer management (ring)
+	struct pios_fsk_tx_tim_cmd * buffer;
+	uint32_t length;
+
+	// Staging buffer info
+	struct pios_fsk_tx_tim_cmd stagingBuffer[10];
+	uint32_t nextStagingCmd;
+	uint32_t numStagingCmds;
+};
+
+void PIOS_FSK_TX_cmd_generateBits( struct pios_fsk_tx_tim_cmd * cmdBuffer, uint8_t polarity, uint8_t count );
+uint32_t PIOS_FSK_TX_cmd_generateByte( struct pios_fsk_tx_tim_cmd * cmdBuffer, uint8_t byte );
+
+struct pios_fsk_tx_data_buffer
+{
+	uint8_t * buffer;
+	uint32_t nextRead;
+	uint32_t nextWrite;
+	uint32_t length;
+};
+
+uint32_t PIOS_FSK_TX_data_readByte( struct pios_fsk_tx_data_buffer* dataBuffer, uint8_t * byte );
+uint32_t PIOS_FSK_TX_data_write( struct pios_fsk_tx_data_buffer* dataBuffer, const uint8_t * data, uint32_t length );
+uint32_t PIOS_FSK_TX_data_empty( struct pios_fsk_tx_data_buffer* dataBuffer );
+uint32_t PIOS_FSK_TX_data_available( struct pios_fsk_tx_data_buffer* dataBuffer );
+
+struct pios_fsk_tx_device
 {
 	// Configuration
 	struct pios_fsk_cfg * cfg;
 
-	// Buffer management (ring)
-	struct pios_fsk_tim_cmd_byte * buffer;
-	uint32_t nextWrite;
-	uint32_t nextRead;
+	struct pios_fsk_tx_command_buffer cmdBuffer;
+	struct pios_fsk_tx_data_buffer dataBuffer;
 
 	// Timing information
 	uint32_t bitHalfPeriod[2];
 	uint32_t bitRepeat[2];
 };
 
-static struct pios_fsk_device fsk_dev;
+static struct pios_fsk_tx_device fsk_dev;
 
-static void PIOS_Fsk_tim_overflow_cb (uintptr_t tim_id, uintptr_t context, uint8_t channel, uint16_t count);
-static void PIOS_Fsk_tim_edge_cb (uintptr_t tim_id, uintptr_t context, uint8_t chan_idx, uint16_t count);
+static void PIOS_FSK_TX_tim_overflow_cb (uintptr_t tim_id, uintptr_t context, uint8_t channel, uint16_t count);
+static void PIOS_FSK_TX_tim_edge_cb (uintptr_t tim_id, uintptr_t context, uint8_t chan_idx, uint16_t count);
+static void PIOS_FSK_TX_DMA_Handler(void);
 
 const static struct pios_tim_callbacks tim_callbacks = {
-	.overflow = PIOS_Fsk_tim_overflow_cb,
-	.edge     = PIOS_Fsk_tim_edge_cb,
+	.overflow = PIOS_FSK_TX_tim_overflow_cb,
+	.edge     = PIOS_FSK_TX_tim_edge_cb,
 };
 
 extern uintptr_t pios_com_aux_id;
@@ -92,28 +123,7 @@ void PIOS_SpinDebugMsg( char * msg )
 	}
 }
 
-static void PIOS_Fsk_DMA_Handler(void)
-{
-	PIOS_DebugMsg("DMA IRQ handler\n");
-	if (DMA_GetFlagStatus(DMA2_IT_TC1))
-	{
-		DMA_ClearFlag(DMA2_IT_TC1);
-		PIOS_DebugMsg("\tDMA Clear TC\n");
-	}
-	else if (DMA_GetFlagStatus(DMA2_IT_HT1))
-	{
-		DMA_ClearFlag(DMA2_IT_HT1);
-		PIOS_DebugMsg("\tDMA Clear HT\n");
-	}
-	else
-	{
-		// Probably due to transfer errors
-		DMA_ClearFlag((DMA2_FLAG_TC1 | DMA2_FLAG_TE1 | DMA2_FLAG_HT1 | DMA2_FLAG_GL1));
-		PIOS_DebugMsg("DMA Clear ALL\n");
-	}
-}
-
-int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
+int32_t PIOS_FSK_TX_Init(struct pios_fsk_cfg * cfg)
 {
 	PIOS_DebugMsg("FSK Init\n");
 	uintptr_t tim_id;
@@ -122,8 +132,8 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 	}
 
 	RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
-	PIOS_COM_SendFormattedString(pios_com_aux_id, "sizeof(fsk_tim_cmd): %d\n", sizeof(struct pios_fsk_tim_cmd));
-	if (sizeof(struct pios_fsk_tim_cmd) == 2*2 &&
+	PIOS_COM_SendFormattedString(pios_com_aux_id, "sizeof(fsk_tim_cmd): %d\n", sizeof(struct pios_fsk_tx_tim_cmd));
+	if (sizeof(struct pios_fsk_tx_tim_cmd) == 2*2 &&
 		0x4000004C == (uint32_t)(&TIM2->DMAR))
 	{
 		PIOS_DebugMsg("FSK What you expect\n");
@@ -134,9 +144,12 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 	}
 
 	fsk_dev.cfg = cfg;
-	const uint32_t totalBufferSize = cfg->txBufferSize * sizeof(struct pios_fsk_tim_cmd_byte);
-	void * rawBuffer = PIOS_malloc(totalBufferSize + 1);
-	fsk_dev.buffer = (struct pios_fsk_tim_cmd_byte*)(((uint32_t)rawBuffer + 1) & 0xFFFFFFFE);
+	fsk_dev.cmdBuffer.length = 64;
+	fsk_dev.dataBuffer.length = cfg->txBufferSize;
+	const uint32_t cmdBufferSize = fsk_dev.cmdBuffer.length * sizeof(struct pios_fsk_tx_tim_cmd);
+	void * rawBuffer = PIOS_malloc(cmdBufferSize + 1);
+	fsk_dev.cmdBuffer.buffer = (struct pios_fsk_tx_tim_cmd*)(((uint32_t)rawBuffer + 1) & 0xFFFFFFFE);
+	fsk_dev.dataBuffer.buffer = (uint8_t*)PIOS_malloc( fsk_dev.dataBuffer.length );
 
 	const struct pios_tim_channel * chan = &cfg->channel;
 
@@ -218,16 +231,16 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 		NVIC_EnableIRQ(DMA2_Channel1_IRQn);
 		PIOS_DebugMsg("FSK Config DMA\n");
 
-		PIOS_DMA_Install_Interrupt_handler(DMA2_Channel1, &PIOS_Fsk_DMA_Handler);
+		PIOS_DMA_Install_Interrupt_handler(DMA2_Channel1, &PIOS_FSK_TX_DMA_Handler);
 
 		/* DeInitialize the DMA1 Stream2 */
 		DMA_DeInit(DMA2_Channel1);
 
 		DMA_InitTypeDef DMA_InitStructure;
 		DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)(&chan->timer->DMAR);
-		DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t)fsk_dev.buffer;
+		DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t)fsk_dev.cmdBuffer.buffer;
 		DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralDST;
-		DMA_InitStructure.DMA_BufferSize = 2*2 + 0*totalBufferSize;
+		DMA_InitStructure.DMA_BufferSize = cmdBufferSize;
 		DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
 		DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
 		DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
@@ -251,14 +264,11 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 	// Initialize the buffer's contents
 	PIOS_DebugMsg("FSK Init Buffer contents\n");
 	{
-		for (uint32_t i = 0; i < cfg->txBufferSize; ++i)
+		for (uint32_t i = 0; i < cmdBufferSize; ++i)
 		{
-			for (uint32_t bit = 0; bit < 8; ++bit)
-			{
-				uint32_t bitSelection = bit % 2;
-				fsk_dev.buffer[i].bit[bit].ARR = fsk_dev.bitHalfPeriod[bitSelection];
-				fsk_dev.buffer[i].bit[bit].RCR = fsk_dev.bitRepeat[bitSelection];
-			}
+			uint32_t bitSelection = i % 2;
+			fsk_dev.cmdBuffer.buffer[i].ARR = fsk_dev.bitHalfPeriod[bitSelection];
+			fsk_dev.cmdBuffer.buffer[i].RCR = fsk_dev.bitRepeat[bitSelection];
 		}
 	}
 
@@ -280,7 +290,7 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 	// TEST CODE:
 	{
 		char buffer[32] = {0xFF};
-		PIOS_Fsk_Write( &buffer[0], 32 );
+		PIOS_FSK_TX_Write( &buffer[0], 32 );
 	}
 	PIOS_DebugMsg("End FSK init\n");
 	//PIOS_SpinDebugMsg("EndInitSpin\n");
@@ -295,14 +305,243 @@ int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg)
 	return 0;
 }
 
-uint32_t PIOS_Fsk_Write(const void * pData, uint32_t length)
+void PIOS_FSK_TX_cmd_generateBits( struct pios_fsk_tx_tim_cmd * cmdBuffer, uint8_t polarity, uint8_t count )
 {
-	//
-
-	return 0;
+	cmdBuffer->ARR = fsk_dev.bitHalfPeriod[polarity];
+	cmdBuffer->RCR = fsk_dev.bitRepeat[polarity] * count;
 }
 
-static void PIOS_Fsk_tim_overflow_cb (uintptr_t tim_id, uintptr_t context, uint8_t channel, uint16_t count)
+uint32_t PIOS_FSK_TX_cmd_generateByte( struct pios_fsk_tx_tim_cmd * cmdBuffer, uint8_t byte )
+{
+	// Returns number of commands generated
+	// Worst case, a byte will require 10 discrete timer commands
+	// L|HLHLHLHL|H
+	// Best case, a byte will require 2 timer commands
+	// L|LLLLLLLL|H
+	// L|HHHHHHHH|H
+	// Generate the least commands as possible
+	uint8_t curPolarity = 0;
+	uint8_t count = 1;
+	uint8_t generatedCmds = 0;
+	uint32_t byteAndStop = byte | 0x10;
+	for (uint8_t i = 0; i < 8 + 1; ++i)
+	{
+		uint8_t polarity = byteAndStop & 1;
+		byteAndStop = byteAndStop >> 1;
+
+		if (polarity == curPolarity)
+		{
+			count++;
+		}
+		else
+		{
+			PIOS_FSK_TX_cmd_generateBits( &cmdBuffer[generatedCmds++], curPolarity, count );
+			curPolarity = polarity;
+			count = 1;
+		}
+	}
+	PIOS_FSK_TX_cmd_generateBits( &cmdBuffer[generatedCmds++], curPolarity, count );
+	return generatedCmds;
+}
+
+uint32_t PIOS_FSK_TX_data_empty( struct pios_fsk_tx_data_buffer* dataBuffer )
+{
+	return dataBuffer->nextRead == dataBuffer->nextWrite;
+}
+
+uint32_t PIOS_FSK_TX_data_available( struct pios_fsk_tx_data_buffer* dataBuffer )
+{
+	// Difference between write/read pointers.
+	// add length on because mod of negative numbers is undefined
+	// and once we have underflowed there is no guarantee
+	// it has wrapped correctly, unless max_uint can be divided evenly by
+	// length
+	return (dataBuffer->nextWrite - dataBuffer->nextRead + dataBuffer->length)
+		% dataBuffer->length;
+}
+
+uint32_t PIOS_FSK_TX_data_write( struct pios_fsk_tx_data_buffer* dataBuffer, const uint8_t * data, uint32_t length )
+{
+	uint32_t available = PIOS_FSK_TX_data_available( dataBuffer );
+	uint32_t totalToCopy = available;
+	if (length < totalToCopy)
+	{
+		totalToCopy = length;
+	}
+
+	// Potentially we need to write this data in 2 steps
+	// The first step is from current position to the end of the buffer.
+	// The second step is from the start of the buffer to the read position
+	uint32_t numToEnd = dataBuffer->length - dataBuffer->nextWrite;
+	uint32_t numToCopy = (numToEnd < totalToCopy) ? numToEnd : totalToCopy;
+	memcpy( &dataBuffer[dataBuffer->nextWrite], data, numToCopy );
+
+	dataBuffer->nextWrite = (dataBuffer->nextWrite + numToCopy) % dataBuffer->length;
+	length -= numToCopy;
+	if (length == 0)
+	{
+		// We haven't wrapped.
+		// So we're done
+		return totalToCopy;
+	}
+
+	// Not done yet, lets copy the rest of the data
+	data += numToCopy;
+
+	// Copy the remaining data
+	// Don't allow writes all the way up to the read marker
+	// because that would mean nextWrite == nextRead again,
+	// which is our empty condition
+	uint32_t numToRead = dataBuffer->nextRead - 1;
+	numToCopy = (length < numToRead) ? length: numToRead;
+	memcpy( &dataBuffer[0], data, numToCopy );
+	dataBuffer->nextWrite = numToCopy;
+
+	return totalToCopy;
+}
+
+uint32_t PIOS_FSK_TX_data_readByte( struct pios_fsk_tx_data_buffer* dataBuffer, uint8_t * byte )
+{
+	if (PIOS_FSK_TX_data_empty( dataBuffer ))
+	{
+		return 0;
+	}
+
+	*byte = dataBuffer->buffer[dataBuffer->nextRead];
+	dataBuffer->nextRead = (dataBuffer->nextRead + 1) % dataBuffer->length;
+	return 1;
+}
+
+void PIOS_FSK_TX_updateCommandBuffer(
+	struct pios_fsk_tx_data_buffer * dataBuffer,
+	struct pios_fsk_tx_command_buffer * cmdBuffer,
+	struct pios_fsk_tx_tim_cmd * buffer,
+	uint32_t length)
+{
+	// When we update the command buffer, we update half of it,
+	// because the other half is yet to be sent to the timer.
+	// When we update the buffer, the entire half of the command buffer
+	// must be filled, because the DMA controller WILL send the data.
+	// if we have no data to fill it with, we should fill it
+	// with stop bits. That way the next start bit will be ready.
+	// If we have filled one half of the command buffer with stop bits
+	// and we are now updating again, then we should fill the other half
+	// as well, and disable the timer.
+	// If we have disabled the timer, we should fill from the start of
+	// the command buffer and then restart the timer to set it all off again.
+
+	// Because we must always fill the command buffer, we may not be
+	// able to fit all of a byte's commands into the buffer at a time.
+	// So we have a 10 command long staging buffer that will always
+	// fit a byte of commands, and when filling the command buffer
+	// we always start from there for commands first before generating
+	// the commands for more bytes.
+
+	// Begin filling from staging buffer
+	// ASSUMPTION: CmdBuffer length is longer than a whole staging buffer
+	// so total length of cmdbuffer must be at least 2 staging buffers long
+	// since we update in halves
+	uint32_t curOffset = cmdBuffer->numStagingCmds - cmdBuffer->nextStagingCmd;
+
+	memcpy( buffer, &cmdBuffer->stagingBuffer[cmdBuffer->nextStagingCmd], curOffset);
+	cmdBuffer->numStagingCmds = 0;
+
+	// Now start generating directly into the command buffer
+	while (curOffset < length)
+	{
+		uint8_t byte;
+		if (PIOS_FSK_TX_data_readByte( dataBuffer, &byte ))
+		{
+			// If we have more than 10 cmds left
+			uint32_t cmdsRemaining = length - curOffset;
+			if (cmdsRemaining > 10)
+			{
+				// Generate directly into the command buffer
+				curOffset += PIOS_FSK_TX_cmd_generateByte( &buffer[curOffset], byte);
+			}
+			else
+			{
+				// We need to generate via the staging buffer
+				cmdBuffer->numStagingCmds = PIOS_FSK_TX_cmd_generateByte( &cmdBuffer->stagingBuffer[0], byte );
+				// Now copy from staging into destination
+				uint8_t copyComplete = cmdBuffer->numStagingCmds < cmdsRemaining;
+				uint32_t amountToCopy = (copyComplete) ? cmdBuffer->numStagingCmds : cmdsRemaining;
+				memcpy( &buffer[curOffset], &cmdBuffer->stagingBuffer[0],
+					amountToCopy * sizeof(struct pios_fsk_tx_tim_cmd));
+				cmdBuffer->nextStagingCmd = amountToCopy;
+
+				// If we didn't get to copy the entire staging buffer
+				// then we are full!
+				if (copyComplete == 0)
+				{
+					return;
+				}
+			}
+		}
+		else
+		{
+			// Fill the rest of the buffer with HIGH cmds
+			for (;curOffset < length; ++curOffset)
+			{
+				PIOS_FSK_TX_cmd_generateBits( &buffer[curOffset], 1, 1 );
+			}
+
+			// Return because there is no more data to be generated
+			return;
+		}
+	}
+
+	// If we got here then one of the direct generations
+	// into the command buffer managed to fill the buffer
+	// just right
+}
+
+void PIOS_FSK_TX_handleDMAtransferComplete( uint8_t complete )
+{
+	uint32_t updateLength = fsk_dev.cmdBuffer.length / 2;
+	uint32_t offset = complete ? updateLength : 0;
+	PIOS_FSK_TX_updateCommandBuffer(
+		&fsk_dev.dataBuffer,
+		&fsk_dev.cmdBuffer,
+		&fsk_dev.cmdBuffer.buffer[offset],
+		updateLength);
+}
+
+static void PIOS_FSK_TX_DMA_Handler(void)
+{
+	PIOS_DebugMsg("DMA IRQ handler\n");
+	if (DMA_GetFlagStatus(DMA2_IT_TC1))
+	{
+		DMA_ClearFlag(DMA2_IT_TC1);
+		PIOS_DebugMsg("\tDMA Clear TC\n");
+		PIOS_FSK_TX_handleDMAtransferComplete( 1 );
+	}
+	else if (DMA_GetFlagStatus(DMA2_IT_HT1))
+	{
+		DMA_ClearFlag(DMA2_IT_HT1);
+		PIOS_DebugMsg("\tDMA Clear HT\n");
+		PIOS_FSK_TX_handleDMAtransferComplete( 0 );
+	}
+	else
+	{
+		// Probably due to transfer errors
+		DMA_ClearFlag((DMA2_FLAG_TC1 | DMA2_FLAG_TE1 | DMA2_FLAG_HT1 | DMA2_FLAG_GL1));
+		PIOS_DebugMsg("DMA Clear ALL\n");
+	}
+}
+
+uint32_t PIOS_FSK_TX_Write(const void * pData, uint32_t length)
+{
+	// Copy the data into the buffer
+	uint32_t copiedBytes = PIOS_FSK_TX_data_write(
+		&fsk_dev.dataBuffer,
+		(const uint8_t *)pData,
+		length);
+
+	return copiedBytes;
+}
+
+static void PIOS_FSK_TX_tim_overflow_cb (uintptr_t tim_id, uintptr_t context, uint8_t channel, uint16_t count)
 {
 	PIOS_DebugMsg("TIM Overflow IRQ Handler\n");
 #if 0 // PWM code
@@ -330,7 +569,7 @@ static void PIOS_Fsk_tim_overflow_cb (uintptr_t tim_id, uintptr_t context, uint8
 	return;
 }
 
-static void PIOS_Fsk_tim_edge_cb (uintptr_t tim_id, uintptr_t context, uint8_t chan_idx, uint16_t count)
+static void PIOS_FSK_TX_tim_edge_cb (uintptr_t tim_id, uintptr_t context, uint8_t chan_idx, uint16_t count)
 {
 	PIOS_DebugMsg("TIM Edge IRQ Handler\n");
 

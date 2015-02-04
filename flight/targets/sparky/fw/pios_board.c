@@ -1110,7 +1110,7 @@ void PIOS_Board_Init(void) {
 	/* Make sure we have at least one telemetry link configured or else fail initialization */
 	PIOS_Assert(pios_com_telem_rf_id || pios_com_telem_usb_id);
 
-	PIOS_Fsk_Init(&pios_fsk_cfg);
+	PIOS_FSK_TX_Init(&pios_fsk_cfg);
 }
 
 /**

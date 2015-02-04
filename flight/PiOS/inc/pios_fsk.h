@@ -47,7 +47,7 @@ struct pios_fsk_cfg
 	struct pios_tim_channel channel;
 };
 
-extern int32_t PIOS_Fsk_Init(struct pios_fsk_cfg * cfg);
-extern uint32_t PIOS_Fsk_Write(const void * pData, uint32_t length);
+extern int32_t PIOS_FSK_TX_Init(struct pios_fsk_cfg * cfg);
+extern uint32_t PIOS_FSK_TX_Write(const void * pData, uint32_t length);
 
 #endif /* PIOS_FSK_H_ */

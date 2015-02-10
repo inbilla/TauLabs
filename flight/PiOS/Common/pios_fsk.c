@@ -125,6 +125,20 @@ void PIOS_SpinDebugMsg( char * msg )
 	}
 }
 
+#define ASSERT_IMPL( exp, file, lineNum ) \
+	do{\
+		if (!(exp))\
+		{\
+			PIOS_COM_SendFormattedString( pios_com_aux_id, "Assert Failed: ");\
+			/*PIOS_COM_SendFormattedString( pios_com_aux_id, "%s", file);*/\
+			PIOS_COM_SendFormattedString( pios_com_aux_id, "@%d - ", lineNum);\
+			/*PIOS_COM_SendFormattedString( pios_com_aux_id, "%s", #exp);*/\
+			PIOS_COM_SendFormattedString( pios_com_aux_id, "\n");\
+		}\
+	}while(0)
+
+#define ASSERT( exp ) ASSERT_IMPL( exp, __FILE__, __LINE__ )
+
 int32_t PIOS_FSK_TX_Init(struct pios_fsk_cfg * cfg)
 {
 	PIOS_DebugMsg("FSK Init\n");
@@ -135,15 +149,9 @@ int32_t PIOS_FSK_TX_Init(struct pios_fsk_cfg * cfg)
 
 	RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
 	PIOS_COM_SendFormattedString(pios_com_aux_id, "sizeof(fsk_tim_cmd): %d\n", sizeof(struct pios_fsk_tx_tim_cmd));
-	if (sizeof(struct pios_fsk_tx_tim_cmd) == 2*2 &&
-		0x4000004C == (uint32_t)(&TIM2->DMAR))
-	{
-		PIOS_DebugMsg("FSK What you expect\n");
-	}
-	else
-	{
-		PIOS_DebugMsg("FSK NOT what you expect\n");
-	}
+
+	ASSERT( sizeof(struct pios_fsk_tx_tim_cmd) == 2*2 );
+	ASSERT( 0x4000004C == (uint32_t)(&TIM2->DMAR) );
 
 	fsk_dev.cfg = cfg;
 
@@ -164,6 +172,7 @@ int32_t PIOS_FSK_TX_Init(struct pios_fsk_cfg * cfg)
 		fsk_dev.bitRepeat[0] = usPerBit / fsk_dev.bitHalfPeriod[0] / 2 - 1;
 		fsk_dev.bitRepeat[1] = usPerBit / fsk_dev.bitHalfPeriod[1] / 2 - 1;
 	}
+
 
 	uint32_t bitSelection  = 0;
 
@@ -293,7 +302,12 @@ int32_t PIOS_FSK_TX_Init(struct pios_fsk_cfg * cfg)
 
 
 	// TEST CODE:
-	char buffer[32] = {0xFF};
+	char buffer[32] = {
+		0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
+		0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
+		0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
+		0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
+		};
 	{
 		PIOS_FSK_TX_Write( &buffer[0], 32 );
 	}
@@ -354,6 +368,11 @@ uint32_t PIOS_FSK_TX_cmd_generateByte( struct pios_fsk_tx_tim_cmd * cmdBuffer, u
 
 void PIOS_FSK_TX_cmd_init( struct pios_fsk_tx_command_buffer * cmdBuffer, uint32_t size )
 {
+	// ASSUMPTION: CmdBuffer length is longer than a whole staging buffer
+	// so total length of cmdbuffer must be at least 2 staging buffers long
+	// since we update in halves
+	ASSERT( size >= 2 * 10 );
+
 	// Buffer must be aligned to 16bit boundary
 	cmdBuffer->length = size;
 	const uint32_t cmdBufferSize = size * sizeof(struct pios_fsk_tx_tim_cmd);
@@ -364,8 +383,14 @@ void PIOS_FSK_TX_cmd_init( struct pios_fsk_tx_command_buffer * cmdBuffer, uint32
 }
 
 
-void PIOS_FSK_TX_data_init( struct pios_fsk_tx_data_buffer* dataBuffer, uint32_t size )
+void PIOS_FSK_TX_data_init( struct pios_fsk_tx_data_buffer * dataBuffer, uint32_t size )
 {
+	// ASSUMPTION: One byte of this buffer is always going to be unused
+	// when the buffer is "Full" because read == write when the
+	// buffer is empty. So size must be larger than 1.
+	// Otherwise the buffer will be both empty and full at the same time.
+	ASSERT( size > 1 );
+
 	dataBuffer->length = size;
 	dataBuffer->buffer = (uint8_t*)PIOS_malloc( size );
 	dataBuffer->nextWrite = 0;
@@ -384,7 +409,7 @@ uint32_t PIOS_FSK_TX_data_available( struct pios_fsk_tx_data_buffer* dataBuffer 
 	// and once we have underflowed there is no guarantee
 	// it has wrapped correctly, unless max_uint can be divided evenly by
 	// length
-	return (dataBuffer->nextWrite - dataBuffer->nextRead + dataBuffer->length)
+	return (dataBuffer->nextRead - dataBuffer->nextWrite + dataBuffer->length - 1)
 		% dataBuffer->length;
 }
 
@@ -392,8 +417,14 @@ uint32_t PIOS_FSK_TX_data_write(
 	struct pios_fsk_tx_data_buffer* dataBuffer,
 	const uint8_t * data, uint32_t length )
 {
-//return 0;
+	ASSERT( dataBuffer->nextWrite < dataBuffer->length );
+
 	uint32_t available = PIOS_FSK_TX_data_available( dataBuffer );
+	ASSERT( available < dataBuffer->length );
+	if (available == 0)
+	{
+		return 0;
+	}
 	uint32_t totalToCopy = (length < available) ? length : available;
 
 	// Potentially we need to write this data in 2 steps
@@ -401,44 +432,51 @@ uint32_t PIOS_FSK_TX_data_write(
 	// The second step is from the start of the buffer to the read position
 	uint32_t numToEnd = dataBuffer->length - dataBuffer->nextWrite;
 	uint32_t numToCopy = (numToEnd < totalToCopy) ? numToEnd : totalToCopy;
-	//memcpy( &dataBuffer->buffer[dataBuffer->nextWrite], data, numToCopy );
-//return 0;
+	memcpy( &dataBuffer->buffer[dataBuffer->nextWrite], data, numToCopy );
+
 	dataBuffer->nextWrite = (dataBuffer->nextWrite + numToCopy) % dataBuffer->length;
-	length -= numToCopy;
-	if (length == 0)
+	data += numToCopy;
+	numToCopy = totalToCopy - numToCopy;
+
+	if (numToCopy == 0)
 	{
+		// Complete copy done
 		// We haven't wrapped.
 		// So we're done
+		ASSERT( dataBuffer->nextWrite < dataBuffer->length );
+		ASSERT( dataBuffer->nextWrite != dataBuffer->nextRead );
 		return totalToCopy;
 	}
-
-	// Not done yet, lets copy the rest of the data
-	data += numToCopy;
 
 	// Copy the remaining data
 	// Don't allow writes all the way up to the read marker
 	// because that would mean nextWrite == nextRead again,
-	// which is our empty condition
-	uint32_t numToRead = dataBuffer->nextRead - 1;
-	numToCopy = (length < numToRead) ? length: numToRead;
-	//memcpy( &dataBuffer->buffer[0], data, numToCopy );
+	// which is our empty condition.
+	// The inital calculation of the available space should
+	// cover this
+	memcpy( &dataBuffer->buffer[0], data, numToCopy );
 	dataBuffer->nextWrite = numToCopy;
+
+	ASSERT( dataBuffer->nextWrite < dataBuffer->length );
+	ASSERT( dataBuffer->nextWrite != dataBuffer->nextRead );
 
 	return totalToCopy;
 }
 
 uint32_t PIOS_FSK_TX_data_readByte( struct pios_fsk_tx_data_buffer* dataBuffer, uint8_t * byte )
 {
-	//*byte = 0xA0;
-	//return 1;
-
 	if (PIOS_FSK_TX_data_empty( dataBuffer ))
 	{
 		return 0;
 	}
 
+	ASSERT( dataBuffer->nextRead < dataBuffer->length );
+
 	*byte = dataBuffer->buffer[dataBuffer->nextRead];
 	dataBuffer->nextRead = (dataBuffer->nextRead + 1) % dataBuffer->length;
+
+	ASSERT( dataBuffer->nextRead < dataBuffer->length );
+
 	return 1;
 }
 
@@ -448,9 +486,6 @@ void PIOS_FSK_TX_updateCommandBuffer(
 	struct pios_fsk_tx_tim_cmd * buffer,
 	uint32_t length)
 {
-	//PIOS_FSK_TX_cmd_generateByte( &cmdBuffer->buffer[0], 0xAA );
-	//return;
-
 	// When we update the command buffer, we update half of it,
 	// because the other half is yet to be sent to the timer.
 	// When we update the buffer, the entire half of the command buffer
@@ -470,14 +505,16 @@ void PIOS_FSK_TX_updateCommandBuffer(
 	// we always start from there for commands first before generating
 	// the commands for more bytes.
 
+	ASSERT( dataBuffer->nextWrite < dataBuffer->length );
+	ASSERT( dataBuffer->nextRead < dataBuffer->length );
+	ASSERT( cmdBuffer->nextStagingCmd <= cmdBuffer->numStagingCmds );
+
 	// Begin filling from staging buffer
-	// ASSUMPTION: CmdBuffer length is longer than a whole staging buffer
-	// so total length of cmdbuffer must be at least 2 staging buffers long
-	// since we update in halves
 	uint32_t curOffset = cmdBuffer->numStagingCmds - cmdBuffer->nextStagingCmd;
 
 	memcpy( buffer, &cmdBuffer->stagingBuffer[cmdBuffer->nextStagingCmd],
 		curOffset * sizeof(struct pios_fsk_tx_tim_cmd));
+	cmdBuffer->nextStagingCmd = 0;
 	cmdBuffer->numStagingCmds = 0;
 
 	// Now start generating directly into the command buffer
